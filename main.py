@@ -7,7 +7,7 @@ import openai
 import aiohttp
 import asyncio
 
-env_file = '/Users/nikitakalinin/PycharmProjects/ai_study_assistant/.env'
+env_file = '.env'
 
 if not os.path.exists(env_file):
     raise ValueError(f"{env_file} file not found in the directory {os.getcwd()}")
