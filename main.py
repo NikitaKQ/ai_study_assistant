@@ -1,11 +1,17 @@
 import logging
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import Command
+from aiogram.types import BotCommand, BotCommandScopeDefault, InputFile
 from dotenv import load_dotenv, find_dotenv, dotenv_values
 import os
 import openai
 import aiohttp
 import asyncio
+from PIL import Image
+import matplotlib.pyplot as plt
+import io
+import re
+import tempfile
 
 env_file = '.env'
 
@@ -16,26 +22,38 @@ config = dotenv_values(env_file)
 
 API_TOKEN = config.get('TELEGRAM_BOT_API_TOKEN')
 OPENAI_API_KEY = config.get('OPENAI_API_KEY')
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 
-# Initialize bot and dispatcher
 bot = Bot(token=API_TOKEN)
 dp = Dispatcher()
 
-# Set OpenAI API key
 openai.api_key = OPENAI_API_KEY
 
 chat_history = {}
 
-# Start command handler
+async def set_commands(bot: Bot):
+    commands = [
+        BotCommand(command='/start', description='Запустить бота'),
+        BotCommand(command='help', description='Возможности бота'),
+        BotCommand(command='delete_memory', description='Стереть контекст')
+    ]
+    await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+
+@dp.message(Command(commands=['delete_memory']))
+async def delete_memory(message: types.Message):
+    user_id = message.from_user.id
+    if user_id in chat_history:
+        del chat_history[user_id]
+        await message.reply('История сообщений была успешно удалена.')
+    else:
+        await message.reply("У вас нет сохраненной истории сообщений.")
+
 @dp.message(Command(commands=['start']))
 async def send_welcome(message: types.Message):
     user_id = message.from_user.id
     chat_history[user_id] = []
     await message.reply("Привет! Я твой ассистент по математическому анализу. Напиши /help, чтобы узнать, что я умею.")
 
-# Help command handler
 @dp.message(Command(commands=['help']))
 async def send_help(message: types.Message):
     help_text = (
@@ -48,7 +66,6 @@ async def send_help(message: types.Message):
     )
     await message.reply(help_text)
 
-# Handle text messages
 @dp.message()
 async def handle_message(message: types.Message):
     user_id = message.from_user.id
@@ -58,7 +75,6 @@ async def handle_message(message: types.Message):
         chat_history[user_id] = []
     chat_history[user_id].append({"role": "user", "content": user_input})
 
-    # Add assistant response to chat history
     response = await get_openai_response(user_id)
     chat_history[user_id].append({"role": "assistant", "content": response})
 
@@ -69,6 +85,13 @@ async def handle_message(message: types.Message):
 async def get_openai_response(user_input: int) -> str:
     messages = chat_history[user_input]
 
+    system_prompt = {
+        "role": "system",
+        "content": "Ты - ассистент преподавателя по математическому анализу. Помогай с проверкой домашних заданий, объясняй материал, отвечай на вопросы по предмету и давай подсказки по домашнему заданию, но никогда не давай готовых решений задач. Все формулы ты пишешь обычным текстом, а вычисления делаешь строго в python. Код ты не выводишь, Вычисления прописываешь текстом. Также ты можешь проверять домашние задания и ставить оценку от 0 до 10, где 0 это пустое или полностью неправильно домашнее задание, а 10 это идеальное домашнее задание. При проверке домашнего задания ты сначала говоришь оценку, а потом говоришь в каких номерах есть ошибки и потом более детально их разбираешь. В чате не поддреживается латех так что пиши формулы без всяких \\ чтобы было понятно что написано обычным текстом. Нельзя использовать LaTex в ответе, только по просьбе ученика!!!"
+    }
+
+    messages.insert(0, system_prompt)
+
     async with aiohttp.ClientSession() as session:
         async with session.post(
             'https://api.openai.com/v1/chat/completions',
@@ -77,9 +100,9 @@ async def get_openai_response(user_input: int) -> str:
                 'Content-Type': 'application/json'
             },
             json={
-                'model': 'gpt-3.5-turbo',
+                'model': 'gpt-4o',
                 'messages': messages,
-                'max_tokens': 500,
+                'max_tokens': 1500,
                 'temperature': 0.7,
             }
         ) as resp:
@@ -93,6 +116,7 @@ async def get_openai_response(user_input: int) -> str:
             return data['choices'][0]['message']['content'].strip()
 
 async def main():
+    await set_commands(bot)
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
